@@ -1,0 +1,20 @@
+// Constant folding + dead code elimination demo.
+int a = 2 + 3 * 4;        // folds to 14
+bool t = 1 < 2 && true;   // folds to true
+
+if (false) {
+    print("unreachable");
+} else {
+    print("kept");
+}
+
+if (2 > 1) {
+    print("always");
+}
+
+func f(): int {
+    return 10 + 5;        // folds to 15
+    print("dead");        // removed: after return
+}
+
+print(f());

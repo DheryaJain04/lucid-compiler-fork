@@ -1,0 +1,3 @@
+int x = "hello";
+string s = 5;
+bool b = 3 + 4;

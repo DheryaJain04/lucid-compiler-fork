@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lucid — Live Compiler Playground</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">◆</span>
+      <div>
+        <h1>Lucid</h1>
+        <p>a small statically-typed language &mdash; compiled live in C++</p>
+      </div>
+    </div>
+    <div class="pipeline">
+      <span class="phase" data-phase="lexical">Lexer</span><i>›</i>
+      <span class="phase" data-phase="syntax">Parser</span><i>›</i>
+      <span class="phase" data-phase="semantic">Semantic</span><i>›</i>
+      <span class="phase" data-phase="optimizer">Optimizer</span><i>›</i>
+      <span class="phase" data-phase="runtime">Interpreter</span>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <!-- LEFT: editor -->
+    <section class="editor-pane">
+      <div class="toolbar">
+        <select id="examples" title="Load an example program"></select>
+        <button id="runBtn" class="primary">Run ▶</button>
+        <span id="statusPill" class="pill">ready</span>
+      </div>
+      <div class="editor-wrap">
+        <div id="gutter" class="gutter"></div>
+        <textarea id="editor" spellcheck="false" autocomplete="off"
+                  autocorrect="off" autocapitalize="off"></textarea>
+      </div>
+      <div class="ai-bar">
+        <input id="apiKey" type="password" placeholder="Gemini API key (optional — enables AI)">
+        <button id="explainProgramBtn" class="ghost" title="Ask Gemini to explain what this program does">Explain program</button>
+      </div>
+    </section>
+
+    <!-- RIGHT: results -->
+    <section class="results-pane">
+      <nav class="tabs">
+        <button class="tab active" data-tab="tokens">Tokens</button>
+        <button class="tab" data-tab="ast">AST</button>
+        <button class="tab" data-tab="symbols">Symbol Table</button>
+        <button class="tab" data-tab="output">Output</button>
+        <button class="tab" data-tab="optimizer">Optimizer</button>
+      </nav>
+      <div class="panels">
+        <div class="panel active" id="panel-tokens"></div>
+        <div class="panel" id="panel-ast"></div>
+        <div class="panel" id="panel-symbols"></div>
+        <div class="panel" id="panel-output"></div>
+        <div class="panel" id="panel-optimizer"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- BOTTOM: errors -->
+  <section class="errors-pane" id="errorsPane">
+    <div class="errors-head">
+      <span id="errorsTitle">Errors</span>
+    </div>
+    <div id="errorsList" class="errors-list"></div>
+  </section>
+
+  <!-- AI modal -->
+  <div class="modal-backdrop" id="aiModal" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <span id="aiTitle">AI Assistant</span>
+        <button id="aiClose" class="icon-btn">✕</button>
+      </div>
+      <div class="modal-body" id="aiBody"></div>
+    </div>
+  </div>
+
+  <script src="examples.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

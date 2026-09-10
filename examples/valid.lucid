@@ -1,0 +1,24 @@
+// A valid Lucid program exercising every feature.
+int x = 5;
+string name = "Divyanshu";
+bool ready = true;
+
+x = x + 10;
+
+if (x > 10) {
+    print("big");
+} else {
+    print("small");
+}
+
+int i = 0;
+while (i < 5) {
+    print(i);
+    i = i + 1;
+}
+
+func add(int a, int b): int {
+    return a + b;
+}
+
+print(add(3, 4));
