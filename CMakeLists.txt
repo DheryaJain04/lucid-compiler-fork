@@ -24,6 +24,7 @@ add_library(lucid_core STATIC
     src/parser.cpp
     src/semantic.cpp
     src/optimizer.cpp
+    src/ircode.cpp
     src/interpreter.cpp
     src/compiler.cpp
 )
@@ -34,7 +35,7 @@ add_executable(lucidc src/main_cli.cpp)
 target_link_libraries(lucidc PRIVATE lucid_core)
 
 # --- Server ---
-add_executable(lucid-server src/main_server.cpp)
+add_executable(lucid-server src/main_server.cpp src/ai_proxy.cpp)
 target_link_libraries(lucid-server PRIVATE lucid_core)
 
 # cpp-httplib needs threads.
@@ -44,3 +45,8 @@ target_link_libraries(lucid-server PRIVATE Threads::Threads)
 # Tell the server where the web/ assets live (absolute path, baked in at build).
 target_compile_definitions(lucid-server PRIVATE
     LUCID_WEB_DIR="${CMAKE_SOURCE_DIR}/web")
+
+# Windows: sockets library for cpp-httplib.
+if(WIN32)
+    target_link_libraries(lucid-server PRIVATE ws2_32)
+endif()

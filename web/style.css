@@ -274,3 +274,41 @@ table.sym td.ty { font-family: var(--mono); color: var(--purple); }
   .workspace { grid-template-columns: 1fr; grid-template-rows: 45% 55%; }
   .pipeline { display: none; }
 }
+
+/* ---- IR code panel ------------------------------------------------------- */
+.ir-note { margin: 0 0 12px; line-height: 1.6; }
+.ir-table td { font-family: var(--mono); font-size: 12.5px; white-space: pre; }
+.ir-table td.ir-n { color: var(--muted); text-align: right; width: 1%; }
+.ir-table td.ir-text { color: var(--text); }
+.ir-table tr.ir-label td.ir-text { color: var(--purple); font-weight: 600; }
+.ir-table tr.ir-jump  td.ir-text { color: var(--orange); }
+.ir-table tr.ir-call  td.ir-text { color: var(--accent); }
+.ir-table tr.ir-io    td.ir-text { color: var(--accent-2); }
+.ir-key { font-family: var(--mono); padding: 1px 6px; border-radius: 4px; background: var(--bg-3); }
+.ir-key.ir-jump { color: var(--orange); }
+.ir-key.ir-label { color: var(--purple); }
+
+/* ---- Performance panel ------------------------------------------------------ */
+.perf-h { margin: 6px 0 12px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
+.perf-row { display: grid; grid-template-columns: 96px 1fr 84px; gap: 12px; align-items: center; margin-bottom: 9px; }
+.perf-label { font-size: 13px; }
+.perf-track { height: 12px; background: var(--bg-3); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.perf-fill { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); border-radius: 10px; }
+.perf-val { font-family: var(--mono); font-size: 12px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* ---- AI additions --------------------------------------------------------- */
+.ai-footer { margin: 14px 0 0; font-size: 12px; color: var(--muted); }
+.ai-inline { margin: 0 0 10px; }
+.field-label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 6px; }
+#writeDesc {
+  width: 100%; resize: vertical; padding: 10px 12px; border-radius: 8px;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  font: 14px/1.5 var(--sans);
+}
+#writeDesc:focus { outline: none; border-color: var(--accent); }
+.idea-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 12px; }
+.chip { font-size: 12px; padding: 4px 10px; border-radius: 999px; }
+#writeResult { margin-top: 14px; }
+.verdict { margin: 10px 0 12px; padding: 8px 12px; border-radius: 8px; }
+.verdict.ok  { background: rgba(86,211,100,.08); border: 1px solid rgba(86,211,100,.35); }
+.verdict.bad { background: rgba(242,204,96,.08); border: 1px solid rgba(242,204,96,.35); }

@@ -1,0 +1,5 @@
+// expect-exit: 0
+// expect-output: 3|5
+// expect-errors: 
+print(10 - 4 - 3);      // (10-4)-3, not 10-(4-3)
+print(100 / 10 / 2);

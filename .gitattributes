@@ -1,0 +1,4 @@
+# Windows batch files must keep CRLF line endings; executables are binary.
+*.bat text eol=crlf
+*.exe binary
+*.sh  text eol=lf

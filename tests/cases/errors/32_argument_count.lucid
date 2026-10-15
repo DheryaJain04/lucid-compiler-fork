@@ -1,0 +1,5 @@
+// expect-exit: 1
+// expect-output: 
+// expect-errors: semantic:ArgumentCount
+func add(int a, int b): int { return a + b; }
+print(add(1));

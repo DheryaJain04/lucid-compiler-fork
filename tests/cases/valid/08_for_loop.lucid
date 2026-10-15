@@ -1,0 +1,8 @@
+// expect-exit: 0
+// expect-output: 55
+// expect-errors: 
+int sum = 0;
+for (int i = 1; i <= 10; i += 1) {
+    sum += i;
+}
+print(sum);

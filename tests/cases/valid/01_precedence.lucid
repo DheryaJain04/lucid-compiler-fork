@@ -1,0 +1,6 @@
+// expect-exit: 0
+// expect-output: 14|20|2
+// expect-errors: 
+print(2 + 3 * 4);
+print((2 + 3) * 4);
+print(17 % 5);

@@ -1,0 +1,7 @@
+// expect-exit: 0
+// expect-output: false|true|true|true
+// expect-errors: 
+print(true && false);
+print(true || false);
+print(!false);
+print(3 < 5 && 5 < 7);

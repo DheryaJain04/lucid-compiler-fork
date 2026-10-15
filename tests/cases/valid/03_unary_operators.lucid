@@ -1,0 +1,6 @@
+// expect-exit: 0
+// expect-output: -2|false|true
+// expect-errors: 
+print(-5 + 3);
+print(!true);
+print(!(1 > 2));

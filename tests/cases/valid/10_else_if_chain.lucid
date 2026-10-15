@@ -1,0 +1,16 @@
+// expect-exit: 0
+// expect-output: A|B|C
+// expect-errors: 
+func grade(int s): string {
+    if (s >= 90) {
+        return "A";
+    } else if (s >= 70) {
+        return "B";
+    } else {
+        return "C";
+    }
+    return "?";
+}
+print(grade(95));
+print(grade(72));
+print(grade(40));

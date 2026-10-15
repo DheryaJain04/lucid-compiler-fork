@@ -1,0 +1,4 @@
+// expect-exit: 1
+// expect-output: 
+// expect-errors: syntax:IntegerOverflow
+int x = 2147483648;

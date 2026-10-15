@@ -1,0 +1,8 @@
+// expect-exit: 0
+// expect-output: 55
+// expect-errors: 
+func fib(int n): int {
+    if (n < 2) { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
+print(fib(10));

@@ -39,8 +39,16 @@ bool Interpreter::lookup(const std::string& name, Value& out) const {
     return false;
 }
 
+void Interpreter::spendStep(int line) {
+    if (++steps_ > kMaxSteps)
+        throw RuntimeFault{ "Stopped after 2,000,000 steps. Is there an infinite loop, "
+                            "or a loop variable that never changes?", line };
+}
+
 std::vector<std::string> Interpreter::run(Program& program) {
     output_.clear();
+    steps_ = 0;
+    callDepth_ = 0;
     scopes_.clear();
     scopes_.emplace_back();   // global scope
 
@@ -90,12 +98,16 @@ void Interpreter::execStatement(Node* stmt) {
         }
         case NodeKind::While: {
             auto* w = static_cast<While*>(stmt);
-            while (asBool(evalExpr(w->cond.get())))
+            while (asBool(evalExpr(w->cond.get()))) {
+                spendStep(w->line);
                 execBlock(w->body.get());
+            }
             break;
         }
         case NodeKind::Print: {
             auto* p = static_cast<Print*>(stmt);
+            if (output_.size() >= kMaxOutputLines)
+                throw RuntimeFault{ "Output limit reached (10,000 lines). Is a loop printing forever?", p->line };
             output_.push_back(valueToString(evalExpr(p->expr.get())));
             break;
         }
@@ -196,6 +208,7 @@ Value Interpreter::callFunction(Call* call) {
     args.reserve(call->args.size());
     for (auto& a : call->args) args.push_back(evalExpr(a.get()));
 
+    spendStep(call->line);
     if (++callDepth_ > kMaxCallDepth) {
         --callDepth_;
         throw RuntimeFault{ "Call stack overflow (runaway recursion?).", call->line };

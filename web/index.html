@@ -20,6 +20,7 @@
       <span class="phase" data-phase="syntax">Parser</span><i>›</i>
       <span class="phase" data-phase="semantic">Semantic</span><i>›</i>
       <span class="phase" data-phase="optimizer">Optimizer</span><i>›</i>
+      <span class="phase" data-phase="ircode">IR Code</span><i>›</i>
       <span class="phase" data-phase="runtime">Interpreter</span>
     </div>
   </header>
@@ -39,6 +40,7 @@
       </div>
       <div class="ai-bar">
         <input id="apiKey" type="password" placeholder="Gemini API key (optional — enables AI)">
+        <button id="writeCodeBtn" class="ghost" title="Describe a program in English; Gemini writes it and the compiler checks it">✨ Write code</button>
         <button id="explainProgramBtn" class="ghost" title="Ask Gemini to explain what this program does">Explain program</button>
       </div>
     </section>
@@ -51,6 +53,8 @@
         <button class="tab" data-tab="symbols">Symbol Table</button>
         <button class="tab" data-tab="output">Output</button>
         <button class="tab" data-tab="optimizer">Optimizer</button>
+        <button class="tab" data-tab="ir">IR Code</button>
+        <button class="tab" data-tab="perf">Performance</button>
       </nav>
       <div class="panels">
         <div class="panel active" id="panel-tokens"></div>
@@ -58,6 +62,8 @@
         <div class="panel" id="panel-symbols"></div>
         <div class="panel" id="panel-output"></div>
         <div class="panel" id="panel-optimizer"></div>
+        <div class="panel" id="panel-ir"></div>
+        <div class="panel" id="panel-perf"></div>
       </div>
     </section>
   </main>

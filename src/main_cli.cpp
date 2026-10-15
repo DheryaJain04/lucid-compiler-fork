@@ -6,6 +6,11 @@
 // no network — this is the deterministic core's proof and fallback demo.
 // ============================================================================
 #include <fstream>
+#include <cstdio>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -28,6 +33,9 @@ static void printAst(const json& node, const std::string& prefix, bool last, boo
 }
 
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    SetConsoleOutputCP(CP_UTF8);   // the AST tree uses box-drawing characters
+#endif
     if (argc < 2) {
         std::cerr << "Usage: lucidc <program.lucid>\n";
         return 2;
@@ -88,6 +96,24 @@ int main(int argc, char** argv) {
     }
     std::cout << "\n";
 
+    // --- Intermediate code ---
+    std::cout << "--- Intermediate Code (three-address) ---\n";
+    if (!result["ir"].is_null()) {
+        const auto& ir = result["ir"];
+        for (const auto& q : ir["code"]) {
+            std::string op = q.value("op", "");
+            bool flushLeft = (op == "label" || op == "func" || op == "endfunc");
+            std::printf("  %3d  %s%s\n", q.value("n", 0), flushLeft ? "" : "    ",
+                        q.value("text", "").c_str());
+        }
+        std::cout << "  " << ir.value("quads", 0) << " quadruples, "
+                  << ir.value("temps", 0) << " temporaries, "
+                  << ir.value("labels", 0) << " labels\n";
+    } else {
+        std::cout << "  (not generated)\n";
+    }
+    std::cout << "\n";
+
     // --- Output ---
     std::cout << "--- Output ---\n";
     for (const auto& line : result["output"])
@@ -104,6 +130,17 @@ int main(int argc, char** argv) {
         if (!snip.empty()) std::cout << "      | " << snip << "\n";
     }
     if (result["errors"].empty()) std::cout << "  (none)\n";
+    std::cout << "\n";
+
+    // --- Timing ---
+    std::cout << "--- Timing (microseconds) ---\n";
+    if (!result["timings"].is_null()) {
+        const char* order[] = {"lexer", "parser", "semantic", "optimizer", "ircode", "interpreter", "total"};
+        for (const char* k : order) {
+            if (!result["timings"].contains(k)) continue;
+            std::printf("  %-12s %10.1f\n", k, result["timings"][k].get<double>());
+        }
+    }
 
     return result.value("success", false) ? 0 : 1;
 }

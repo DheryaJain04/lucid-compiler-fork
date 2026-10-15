@@ -1,0 +1,5 @@
+// expect-exit: 0
+// expect-output: 
+// expect-errors: 
+// nothing but comments
+// on every line

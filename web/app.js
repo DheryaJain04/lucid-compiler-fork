@@ -3,19 +3,50 @@
 // Responsibilities:
 //   • send source to the C++ server (POST /compile) with a ~300ms debounce
 //   • render tokens, a graphical AST, the symbol table, output, optimizer
-//   • wire the Gemini Flash assistant (explain error, auto-fix loop, explain
-//     program). All AI is optional: with no key the pipeline still works and we
-//     show the exact request that *would* be sent.
+//   • wire the Gemini assistant: explain error, auto-fix loop, explain program,
+//     explain intermediate code, and write a program from a description.
+//     All AI is optional: with no key the pipeline still works and we show the
+//     exact request that *would* be sent.
 //
-// The C++ compiler is the source of truth. The AI never parses or generates
-// program logic — it only explains errors and proposes fixes, which are then
-// re-validated by re-compiling on the server.
+// The authority rule: the AI is never part of the compiler. It never parses,
+// type-checks, or decides whether a program is correct. It may explain, and it
+// may PROPOSE source code — but every proposal is recompiled by the C++
+// compiler on the server, and only the compiler's verdict counts.
 // ============================================================================
 
-// ---- Gemini config (per the build brief) ----------------------------------
-const GEMINI_MODEL = "gemini-3.5-flash";
-const GEMINI_URL =
-  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+// ---- Gemini config ----------------------------------------------------------
+// Tried in order. A model that is busy (429/500/503), unknown (404) or too slow
+// falls through to the next, so one overloaded model never breaks a live demo.
+// 3.5 Flash leads because it answered fastest and most reliably in testing.
+const GEMINI_MODELS = ["gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.8-flash"];
+const GEMINI_TIMEOUT_MS = 30000;
+const geminiUrl = (model) =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+let lastAiCall = null;   // { model, ms, via } of the most recent successful call
+
+// True when the C++ server holds a Gemini key (GET /ai/status). Then AI works
+// for every visitor with no key typed in: requests go to the server's /ai
+// relay, which adds the key, so the key never reaches the browser.
+let serverAi = false;
+const aiReady = (apiKey) => !!apiKey || serverAi;
+
+// One description of the language, shared by every prompt that writes code.
+const LUCID_SPEC = `Lucid is a small statically-typed language.
+- Types: int, string, bool. Every variable is declared with an initialiser: int x = 5;
+- Statements end with ';'. Blocks use { }. Comments start with //.
+- Assignment: x = e;   Compound: x += e;  x -= e;  x *= e;  x /= e;  x %= e;
+- if (cond) { ... } else if (cond) { ... } else { ... }    (braces are required)
+- while (cond) { ... }
+- for (int i = 0; i < n; i += 1) { ... }
+- print(expr);   prints one value per line.
+- Functions: func name(int a, string b): int { ... return value; }
+  Every function returns a value of its declared type. Recursion is allowed.
+- IMPORTANT: a function body can only see its own parameters and locals, plus
+  other functions. It can NOT see global variables - pass values in as parameters.
+- Operators: + (int addition or string concatenation), - * / % on ints,
+  < > <= >= on ints, == != on two values of the same type, && || ! on bools.
+- Conditions must be bool; there is no truthiness (if (n) is an error).
+- No arrays, no loops other than while/for, no input, no string indexing.`;
 
 // ---- DOM handles -----------------------------------------------------------
 const $ = (id) => document.getElementById(id);
@@ -111,10 +142,12 @@ function renderAll(r) {
   safe(() => renderSymbols(r.symbolTable), "symbols");
   safe(() => renderOutput(r.output || []), "output");
   safe(() => renderOptimizer(r.optimized), "optimizer");
+  safe(() => renderIR(r.ir), "ir");
+  safe(() => renderPerf(r.timings, r), "perf");
 }
 
 function renderPipeline(r) {
-  const order = ["lexical", "syntax", "semantic", "optimizer", "runtime"];
+  const order = ["lexical", "syntax", "semantic", "optimizer", "ircode", "runtime"];
   // find earliest failing phase
   let failIdx = -1;
   for (const e of (r.errors || [])) {
@@ -296,6 +329,69 @@ function renderOptimizer(opt) {
     </div>`;
 }
 
+// ---- Intermediate code (three-address quadruples) -------------------------
+function renderIR(ir) {
+  const panel = $("panel-ir");
+  if (!ir) { panel.innerHTML = `<p class="muted">Intermediate code is generated after semantic analysis succeeds.</p>`; return; }
+  const kindOf = (op) =>
+    op === "label" || op === "func" || op === "endfunc" ? "ir-label" :
+    op === "goto" || op === "iffalse" ? "ir-jump" :
+    op === "param" || op === "call" || op === "recv" || op === "ret" ? "ir-call" :
+    op === "print" ? "ir-io" : "";
+  const rows = ir.code.map((q) => {
+    const flush = q.op === "label" || q.op === "func" || q.op === "endfunc";
+    return `<tr class="${kindOf(q.op)}">
+      <td class="ir-n">${q.n}</td>
+      <td class="ir-text">${flush ? "" : "&nbsp;&nbsp;&nbsp;&nbsp;"}${escapeHtml(q.text)}</td>
+      <td>${escapeHtml(q.op)}</td><td>${escapeHtml(q.arg1)}</td><td>${escapeHtml(q.arg2)}</td><td>${escapeHtml(q.result)}</td>
+    </tr>`;
+  }).join("");
+  panel.innerHTML = `
+    <div class="opt-metrics">
+      <div class="metric"><div class="num">${ir.quads}</div><div class="lbl">quadruples</div></div>
+      <div class="metric"><div class="num">${ir.temps}</div><div class="lbl">temporaries</div></div>
+      <div class="metric"><div class="num">${ir.labels}</div><div class="lbl">labels</div></div>
+    </div>
+    <button id="explainIrBtn" class="ghost ai-inline">✨ Explain this intermediate code with AI</button>
+    <p class="muted ir-note">Three-address code generated from the optimised tree. Each line has at most one operator;
+      <span class="ir-key ir-jump">jumps</span> and <span class="ir-key ir-label">labels</span> implement if, while and for.</p>
+    <table class="tokens ir-table">
+      <thead><tr><th>#</th><th>Three-address code</th><th>op</th><th>arg1</th><th>arg2</th><th>result</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="6" class="muted">(empty program)</td></tr>`}</tbody>
+    </table>`;
+  $("explainIrBtn").addEventListener("click", explainIR);
+}
+
+// ---- Per-phase timing --------------------------------------------------------
+function renderPerf(t, r) {
+  const panel = $("panel-perf");
+  if (!t) { panel.innerHTML = `<p class="muted">No timing data.</p>`; return; }
+  const phases = [
+    ["lexer", "Lexer"], ["parser", "Parser"], ["semantic", "Semantic"],
+    ["optimizer", "Optimizer"], ["ircode", "IR Code"], ["interpreter", "Interpreter"],
+  ].filter(([k]) => k in t);
+  const max = Math.max(1, ...phases.map(([k]) => t[k]));
+  const fmt = (us) => us >= 1000 ? (us / 1000).toFixed(2) + " ms" : us.toFixed(1) + " µs";
+  const bars = phases.map(([k, label]) => `
+    <div class="perf-row">
+      <span class="perf-label">${label}</span>
+      <span class="perf-track"><span class="perf-fill" style="width:${Math.max(1.5, (t[k] / max) * 100)}%"></span></span>
+      <span class="perf-val">${fmt(t[k])}</span>
+    </div>`).join("");
+  const opt = r && r.optimized;
+  panel.innerHTML = `
+    <div class="opt-metrics">
+      <div class="metric"><div class="num">${fmt(t.total)}</div><div class="lbl">end to end, incl. JSON</div></div>
+      <div class="metric"><div class="num">${(r.tokens || []).length}</div><div class="lbl">tokens</div></div>
+      ${opt ? `<div class="metric${opt.removed ? " good" : ""}"><div class="num">${opt.removed ? "−" + opt.removed : "0"}</div><div class="lbl">nodes removed by optimiser</div></div>` : ""}
+    </div>
+    <h4 class="perf-h">Time per phase</h4>
+    ${bars}
+    <p class="muted ir-note">Measured with a monotonic clock inside the C++ compiler for this exact program.
+      The end-to-end figure also covers serialising every phase to JSON for this page, so it exceeds the sum of the bars.
+      Phases after a failing phase do not run, so they are not shown.</p>`;
+}
+
 // Compact indented text of an AST (for the optimizer before/after columns).
 function astText(node, prefix = "", last = true, root = true) {
   if (!node) return "";
@@ -373,26 +469,90 @@ function offlinePayloadView(title, prompt) {
   return `<h3>${title} — no API key set</h3>
     <p class="muted">Enter a Gemini API key above to enable AI. The pipeline still works without it.
     This is the <em>exact</em> request that would be sent:</p>
-    <pre>POST ${GEMINI_URL}
+    <pre>POST ${geminiUrl(GEMINI_MODELS[0])}
 header: x-goog-api-key: &lt;YOUR_KEY&gt;
 
 ${escapeHtml(payload)}</pre>`;
 }
 
+// How long a 429 reply asks us to wait, in ms (Gemini sends RetryInfo, e.g. "retryDelay": "7s").
+function retryDelayMs(body) {
+  const m = body.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/);
+  return m ? Math.ceil(parseFloat(m[1]) * 1000) : null;
+}
+
 async function geminiCall(prompt, apiKey) {
-  const res = await fetch(GEMINI_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-    body: JSON.stringify(buildPayload(prompt)),
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Gemini HTTP ${res.status}. ${body.slice(0, 300)}`);
+  const viaServer = !apiKey;   // a pasted key takes priority over the server's
+  const failures = [];
+  const queue = [...GEMINI_MODELS];
+  const retried = new Set();
+  while (queue.length) {
+    const model = queue.shift();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
+    const started = performance.now();
+    let res;
+    try {
+      res = viaServer
+        // Server relay: the server adds its own key; we send only model + prompt.
+        ? await fetch("/ai", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ model, prompt }),
+            signal: controller.signal,
+          })
+        // Visitor's own key: call Gemini directly from the browser.
+        : await fetch(geminiUrl(model), {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+            body: JSON.stringify(buildPayload(prompt)),
+            signal: controller.signal,
+          });
+    } catch (e) {
+      failures.push(`${model}: ${e.name === "AbortError" ? "timed out" : "network error"}`);
+      continue;
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (!res.ok) {
+      const body = await res.text();
+      // A bad or unauthorised key fails identically on every model: stop now.
+      if (res.status === 400 || res.status === 401 || res.status === 403) {
+        const whose = viaServer ? "the server's API key (gemini.key / GEMINI_API_KEY)" : "the API key you pasted";
+        throw new Error(`Gemini rejected the request (HTTP ${res.status}) - check ${whose}. ${body.slice(0, 200)}`);
+      }
+      // Rate-limited (free tier): if Google says the wait is short, wait and
+      // retry this model once before moving on.
+      const wait = res.status === 429 ? retryDelayMs(body) : null;
+      if (wait !== null && wait <= 15000 && !retried.has(model)) {
+        retried.add(model);
+        await new Promise((r) => setTimeout(r, wait + 250));
+        queue.unshift(model);
+        continue;
+      }
+      failures.push(`${model}: HTTP ${res.status}${res.status === 429 ? " (rate limit)" : ""}`);
+      continue;   // busy or unavailable: try the next model
+    }
+
+    const data = await res.json();
+    // Thinking models may split a reply across several parts; join the visible ones.
+    const parts = data?.candidates?.[0]?.content?.parts || [];
+    const text = parts.filter((p) => p.text && !p.thought).map((p) => p.text).join("");
+    if (!text) { failures.push(`${model}: empty reply`); continue; }
+
+    lastAiCall = { model, ms: Math.round(performance.now() - started), via: viaServer ? "server" : "browser" };
+    return text;
   }
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error("Gemini returned no text (check model name / key).");
-  return text;
+  throw new Error("Every model was unavailable. " + failures.join("; ") + ". "
+    + "On the free tier this usually means too many requests in the last minute - wait a minute and try again.");
+}
+
+// "Answered by gemini-3.5-flash in 2.3 s" - shown under every AI reply.
+function aiFooter() {
+  if (!lastAiCall) return "";
+  const how = lastAiCall.via === "server" ? " via the server's key" : " using your key";
+  return `<p class="ai-footer">Answered by <code>${lastAiCall.model}</code> in ${(lastAiCall.ms / 1000).toFixed(1)} s${how}</p>`;
 }
 
 // Strip ```lang ... ``` fences the model may wrap code in.
@@ -432,10 +592,10 @@ Answer with two short sections titled "Explanation:" and "Fix:".`;
 
   openModal("✨ Explain: " + errorObj.type,
             `<p><span class="spinner"></span> Asking Gemini…</p>`);
-  if (!apiKey) { setModalBody(offlinePayloadView("Explain error", prompt)); return; }
+  if (!aiReady(apiKey)) { setModalBody(offlinePayloadView("Explain error", prompt)); return; }
   try {
     const text = await geminiCall(prompt, apiKey);
-    setModalBody(renderMarkdownish(text));
+    setModalBody(renderMarkdownish(text) + aiFooter());
   } catch (e) {
     setModalBody(`<h3>AI request failed</h3><p class="muted">${escapeHtml(String(e))}</p>`);
   }
@@ -444,10 +604,9 @@ Answer with two short sections titled "Explanation:" and "Fix:".`;
 // (2) autoFix -> corrected full source
 async function autoFix(source, errorObj, apiKey) {
   const prompt =
-`You are fixing a program written in "Lucid", a small statically-typed language.
-Types are int, string, bool. Statements end with ';'. Blocks use { }.
-Functions look like:  func name(int a, string b): int { ... return x; }
-print(expr); shows output.  Comments start with //.
+`You are fixing a program written in "Lucid".
+
+${LUCID_SPEC}
 
 A C++ compiler reported this error (authoritative — fix exactly this, change as
 little as possible, keep the program's intent):
@@ -466,7 +625,7 @@ Return ONLY the corrected, complete Lucid program. No explanation, no markdown.`
 async function runAutoFix(errorObj) {
   const apiKey = getKey();
   openModal("🔧 Auto-fix loop", "");
-  if (!apiKey) {
+  if (!aiReady(apiKey)) {
     const prompt = "Fix the Lucid program for: " + errorObj.type + " — " + errorObj.message;
     setModalBody(offlinePayloadView("Auto-fix", prompt));
     return;
@@ -541,12 +700,123 @@ Program:
 ${editor.value}
 ----`;
   openModal("📖 What this program does", `<p><span class="spinner"></span> Asking Gemini…</p>`);
-  if (!apiKey) { setModalBody(offlinePayloadView("Explain program", prompt)); return; }
+  if (!aiReady(apiKey)) { setModalBody(offlinePayloadView("Explain program", prompt)); return; }
   try {
     const text = await geminiCall(prompt, apiKey);
-    setModalBody(renderMarkdownish(text));
+    setModalBody(renderMarkdownish(text) + aiFooter());
   } catch (e) {
     setModalBody(`<h3>AI request failed</h3><p class="muted">${escapeHtml(String(e))}</p>`);
+  }
+}
+
+// (4) explainIR -> how the source became three-address code
+async function explainIR() {
+  const ir = lastResult && lastResult.ir;
+  if (!ir) return;
+  const apiKey = getKey();
+  const source = editor.value.split("\n").map((l, i) => `${i + 1}: ${l}`).join("\n");
+  const listing = ir.code.map((q) => `${String(q.n).padStart(3)}  ${q.text}`).join("\n");
+  const prompt =
+`You are a teaching assistant for a compiler design course. Below is a program
+in the small language "Lucid" and the three-address code (quadruples) that the
+compiler generated from it. Explain to a student how the source was translated:
+what the temporaries (t0, t1, ...) hold, and how the labels and jumps (iffalse,
+goto) implement each if, while and for loop. Refer to instruction numbers and
+source line numbers. Describe only the instructions listed - do not invent any.
+Use short bullet points, about 150 words.
+
+Source:
+----
+${source}
+----
+
+Three-address code:
+----
+${listing}
+----`;
+  openModal("✨ Explain the intermediate code", `<p><span class="spinner"></span> Asking Gemini…</p>`);
+  if (!aiReady(apiKey)) { setModalBody(offlinePayloadView("Explain IR", prompt)); return; }
+  try {
+    const text = await geminiCall(prompt, apiKey);
+    setModalBody(renderMarkdownish(text) + aiFooter());
+  } catch (e) {
+    setModalBody(`<h3>AI request failed</h3><p class="muted">${escapeHtml(String(e))}</p>`);
+  }
+}
+
+// (5) writeProgram -> English description to Lucid, then verified by the compiler.
+// The model proposes; the C++ compiler decides. A rejected program is handed
+// straight to the auto-fix loop.
+const WRITE_IDEAS = [
+  "Print the first 10 Fibonacci numbers",
+  "Check whether 97 is a prime number",
+  "Print the multiplication table of 7",
+  "Add up the even numbers from 1 to 50",
+];
+
+function openWriteCode() {
+  openModal("✨ Write a program from a description", `
+    <p class="muted">Describe a program in plain English. Gemini writes it in Lucid, then the
+      C++ compiler checks it. The AI never decides whether its own code is correct.</p>
+    <label class="field-label" for="writeDesc">What should the program do?</label>
+    <textarea id="writeDesc" rows="3" placeholder="e.g. Print the first 10 Fibonacci numbers"></textarea>
+    <div class="idea-row">${WRITE_IDEAS.map((i) =>
+      `<button type="button" class="chip" data-idea="${escapeHtml(i)}">${escapeHtml(i)}</button>`).join("")}</div>
+    <button id="writeGo" class="primary">Write it</button>
+    <div id="writeResult"></div>`);
+  document.querySelectorAll(".idea-row .chip").forEach((c) =>
+    c.addEventListener("click", () => { $("writeDesc").value = c.dataset.idea; $("writeDesc").focus(); }));
+  $("writeGo").addEventListener("click", writeProgram);
+  $("writeDesc").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) writeProgram();
+  });
+  $("writeDesc").focus();
+}
+
+async function writeProgram() {
+  const desc = $("writeDesc").value.trim();
+  if (!desc) { $("writeDesc").focus(); return; }
+  const apiKey = getKey();
+  const prompt =
+`Write a complete program in the language "Lucid".
+
+${LUCID_SPEC}
+
+Task: ${desc}
+
+Use print to show the results. Keep it short and readable, with a comment or two.
+Return ONLY the Lucid program. No explanation, no markdown.`;
+  const out = $("writeResult");
+  if (!aiReady(apiKey)) { out.innerHTML = offlinePayloadView("Write code", prompt); return; }
+
+  const go = $("writeGo");
+  go.disabled = true;
+  out.innerHTML = `<p><span class="spinner"></span> Gemini is writing the program…</p>`;
+  try {
+    const code = stripFences(await geminiCall(prompt, apiKey));
+    const footer = aiFooter();
+    out.innerHTML = `<p><span class="spinner"></span> Checking it with the C++ compiler…</p>`;
+    const result = await compileRemote(code);   // the compiler's verdict, not the model's
+    const shown = (result.output || []).slice(0, 8);
+    const verdict = result.success
+      ? `<p class="verdict ok">✅ The compiler accepted it. Output: <code>${escapeHtml(shown.join("  ·  "))}${result.output.length > 8 ? "  …" : ""}</code></p>`
+      : `<p class="verdict bad">⚠️ The compiler rejected it — <strong>${escapeHtml(result.errors[0].type)}</strong>
+           (line ${result.errors[0].line}): ${escapeHtml(result.errors[0].message)}</p>`;
+    out.innerHTML = `<pre>${escapeHtml(code)}</pre>${verdict}
+      <button id="writeUse" class="primary">${result.success ? "Load into editor" : "Load it and fix with AI"}</button>
+      ${footer}`;
+    $("writeUse").addEventListener("click", () => {
+      editor.value = code;
+      updateGutter();
+      lastResult = result;
+      renderAll(result);
+      if (result.success) { $("aiModal").hidden = true; setStatus("ok", "written by AI ✓"); }
+      else runAutoFix(result.errors[0]);
+    });
+  } catch (e) {
+    out.innerHTML = `<h3>AI request failed</h3><p class="muted">${escapeHtml(String(e))}</p>`;
+  } finally {
+    go.disabled = false;
   }
 }
 
@@ -599,11 +869,16 @@ function loadExamples() {
 
 $("runBtn").addEventListener("click", runCompile);
 $("explainProgramBtn").addEventListener("click", explainProgram);
+$("writeCodeBtn").addEventListener("click", openWriteCode);
 
 (function init() {
   loadExamples();
   const savedKey = localStorage.getItem("lucid_gemini_key");
   if (savedKey) $("apiKey").value = savedKey;
+  fetch("/ai/status").then((r) => r.json()).then((st) => {
+    serverAi = !!st.serverKey;
+    if (serverAi) $("apiKey").placeholder = "AI is on for everyone (server key). Optional: use your own key";
+  }).catch(() => { /* older server without /ai: visitors paste their own key */ });
   const params = new URLSearchParams(location.search);
   const exParam = parseInt(params.get("ex"), 10);
   const exIndex = Number.isInteger(exParam) && window.LUCID_EXAMPLES[exParam] ? exParam : 0;

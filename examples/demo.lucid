@@ -1,0 +1,14 @@
+int x = 5;
+x = x + 10;
+
+if (x > 10) {
+    print("big");
+} else {
+    print("small");
+}
+
+func add(int a, int b): int {
+    return a + b;
+}
+
+print(add(3, 4));

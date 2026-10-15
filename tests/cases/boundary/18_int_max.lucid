@@ -1,0 +1,5 @@
+// expect-exit: 0
+// expect-output: 2147483647
+// expect-errors: 
+int x = 2147483647;
+print(x);

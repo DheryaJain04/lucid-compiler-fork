@@ -17,7 +17,7 @@ static const std::unordered_map<std::string, TokenType>& keywords() {
         {"else", TokenType::KwElse},     {"while", TokenType::KwWhile},
         {"print", TokenType::KwPrint},   {"func", TokenType::KwFunc},
         {"return", TokenType::KwReturn}, {"true", TokenType::KwTrue},
-        {"false", TokenType::KwFalse},
+        {"false", TokenType::KwFalse},  {"for", TokenType::KwFor},
     };
     return kw;
 }
@@ -129,11 +129,11 @@ std::vector<Token> Lexer::tokenize() {
             tokens.push_back(Token{t, v, startLine, startCol});
         };
         switch (c) {
-            case '+': emit(TokenType::Plus, "+"); break;
-            case '-': emit(TokenType::Minus, "-"); break;
-            case '*': emit(TokenType::Star, "*"); break;
-            case '/': emit(TokenType::Slash, "/"); break;
-            case '%': emit(TokenType::Percent, "%"); break;
+            case '+': if (match('=')) emit(TokenType::PlusAssign, "+="); else emit(TokenType::Plus, "+"); break;
+            case '-': if (match('=')) emit(TokenType::MinusAssign, "-="); else emit(TokenType::Minus, "-"); break;
+            case '*': if (match('=')) emit(TokenType::StarAssign, "*="); else emit(TokenType::Star, "*"); break;
+            case '/': if (match('=')) emit(TokenType::SlashAssign, "/="); else emit(TokenType::Slash, "/"); break;
+            case '%': if (match('=')) emit(TokenType::PercentAssign, "%="); else emit(TokenType::Percent, "%"); break;
             case '(': emit(TokenType::LParen, "("); break;
             case ')': emit(TokenType::RParen, ")"); break;
             case '{': emit(TokenType::LBrace, "{"); break;

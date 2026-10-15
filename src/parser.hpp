@@ -50,6 +50,10 @@ private:
     NodePtr varDecl();
     NodePtr simpleStatement();  // assignment or bare call, starting with an identifier
     NodePtr ifStatement();
+    NodePtr forStatement();
+    NodePtr assignmentNoSemi();   // `x = e` / `x += e` without the trailing ';'
+    bool isCompoundAssign(TokenType t) const;
+    bool isTypeStart() const;
     NodePtr whileStatement();
     NodePtr printStatement();
     NodePtr returnStatement();

@@ -5,6 +5,8 @@
 // ============================================================================
 #include "parser.hpp"
 
+#include <unordered_map>
+
 namespace lucid {
 
 Parser::Parser(std::vector<Token> tokens, const std::string& source, ErrorList& errors)
@@ -87,6 +89,7 @@ NodePtr Parser::statement() {
         case TokenType::KwBool:   return varDecl();
         case TokenType::KwIf:     return ifStatement();
         case TokenType::KwWhile:  return whileStatement();
+        case TokenType::KwFor:    return forStatement();
         case TokenType::KwPrint:  return printStatement();
         case TokenType::KwReturn: return returnStatement();
         case TokenType::KwFunc:   return funcDecl();
@@ -129,16 +132,13 @@ NodePtr Parser::varDecl() {
 }
 
 NodePtr Parser::simpleStatement() {
-    const Token& name = advance();  // the identifier
-    if (check(TokenType::Assign)) {
-        advance();
-        auto value = expression();
+    if (check(TokenType::Identifier) &&
+        (tokens_[pos_ + 1].type == TokenType::Assign || isCompoundAssign(tokens_[pos_ + 1].type))) {
+        auto node = assignmentNoSemi();
         expect(TokenType::Semicolon, "';'");
-        auto node = std::make_unique<Assign>(name.line);
-        node->name = name.value;
-        node->value = std::move(value);
         return node;
     }
+    const Token& name = advance();  // the identifier
     if (check(TokenType::LParen)) {
         auto call = finishCall(name);
         expect(TokenType::Semicolon, "';'");
@@ -156,13 +156,94 @@ NodePtr Parser::ifStatement() {
     auto thenB = block();
     std::unique_ptr<Block> elseB;
     if (match(TokenType::KwElse)) {
-        elseB = block();
+        if (check(TokenType::KwIf)) {
+            // `else if` is sugar: the else branch is a block holding one If.
+            int nested = peek().line;
+            elseB = std::make_unique<Block>(nested);
+            elseB->statements.push_back(ifStatement());
+        } else {
+            elseB = block();
+        }
     }
     auto node = std::make_unique<If>(ln);
     node->cond = std::move(cond);
     node->thenBlock = std::move(thenB);
     node->elseBlock = std::move(elseB);
     return node;
+}
+
+bool Parser::isCompoundAssign(TokenType t) const {
+    return t == TokenType::PlusAssign  || t == TokenType::MinusAssign ||
+           t == TokenType::StarAssign  || t == TokenType::SlashAssign ||
+           t == TokenType::PercentAssign;
+}
+
+bool Parser::isTypeStart() const {
+    return check(TokenType::KwInt) || check(TokenType::KwString) || check(TokenType::KwBool);
+}
+
+// `x = e`, or a compound assignment desugared to `x = x op e`.
+NodePtr Parser::assignmentNoSemi() {
+    const Token& name = expect(TokenType::Identifier, "a variable name");
+    auto node = std::make_unique<Assign>(name.line);
+    node->name = name.value;
+
+    if (match(TokenType::Assign)) {
+        node->value = expression();
+        return node;
+    }
+
+    static const std::unordered_map<int, std::string> ops = {
+        {(int)TokenType::PlusAssign, "+"},  {(int)TokenType::MinusAssign, "-"},
+        {(int)TokenType::StarAssign, "*"},  {(int)TokenType::SlashAssign, "/"},
+        {(int)TokenType::PercentAssign, "%"},
+    };
+    auto it = ops.find((int)peek().type);
+    if (it == ops.end()) error(peek(), "expected '=' after '" + name.value + "'");
+    const Token& opTok = advance();
+
+    // x += e  ==>  x = x + (e)
+    auto bin = std::make_unique<BinaryOp>(opTok.line);
+    bin->op = it->second;
+    auto lhs = std::make_unique<Identifier>(name.line);
+    lhs->name = name.value;
+    bin->left = std::move(lhs);
+    bin->right = expression();
+    node->value = std::move(bin);
+    return node;
+}
+
+// `for (init; cond; step) { body }` is sugar for
+// `{ init; while (cond) { body...; step; } }` — no new AST node is needed,
+// so every later phase handles for-loops without changing at all.
+NodePtr Parser::forStatement() {
+    int ln = peek().line;
+    advance();  // 'for'
+    expect(TokenType::LParen, "'(' after 'for'");
+
+    NodePtr init;
+    if (isTypeStart())      init = varDecl();              // consumes its ';'
+    else if (check(TokenType::Semicolon)) advance();       // empty initialiser
+    else { init = assignmentNoSemi(); expect(TokenType::Semicolon, "';'"); }
+
+    auto cond = expression();
+    expect(TokenType::Semicolon, "';' after the loop condition");
+
+    NodePtr step;
+    if (!check(TokenType::RParen)) step = assignmentNoSemi();
+    expect(TokenType::RParen, "')'");
+
+    auto body = block();
+    if (step) body->statements.push_back(std::move(step));
+
+    auto loop = std::make_unique<While>(ln);
+    loop->cond = std::move(cond);
+    loop->body = std::move(body);
+
+    auto wrapper = std::make_unique<Block>(ln);
+    if (init) wrapper->statements.push_back(std::move(init));
+    wrapper->statements.push_back(std::move(loop));
+    return wrapper;
 }
 
 NodePtr Parser::whileStatement() {

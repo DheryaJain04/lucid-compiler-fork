@@ -22,13 +22,14 @@ enum class TokenType {
     KwInt, KwString, KwBool,
     KwIf, KwElse, KwWhile,
     KwPrint, KwFunc, KwReturn,
-    KwTrue, KwFalse,
+    KwTrue, KwFalse, KwFor,
 
     // Operators
     Plus, Minus, Star, Slash, Percent,   // + - * / %
     Lt, Gt, Le, Ge, EqEq, NotEq,         // < > <= >= == !=
     AndAnd, OrOr, Not,                   // && || !
     Assign,                              // =
+    PlusAssign, MinusAssign, StarAssign, SlashAssign, PercentAssign,  // += -= *= /= %=
 
     // Punctuation
     LBrace, RBrace,                      // { }
@@ -80,6 +81,12 @@ inline const char* tokenTypeName(TokenType t) {
         case TokenType::OrOr:          return "Or";
         case TokenType::Not:           return "Not";
         case TokenType::Assign:        return "Assign";
+        case TokenType::KwFor:         return "Keyword(for)";
+        case TokenType::PlusAssign:    return "PlusAssign";
+        case TokenType::MinusAssign:   return "MinusAssign";
+        case TokenType::StarAssign:    return "StarAssign";
+        case TokenType::SlashAssign:   return "SlashAssign";
+        case TokenType::PercentAssign: return "PercentAssign";
         case TokenType::LBrace:        return "LBrace";
         case TokenType::RBrace:        return "RBrace";
         case TokenType::LParen:        return "LParen";
@@ -104,6 +111,11 @@ inline std::string tokenTypeLexeme(TokenType t) {
         case TokenType::LParen:    return "(";
         case TokenType::RParen:    return ")";
         case TokenType::Assign:    return "=";
+        case TokenType::PlusAssign:    return "+=";
+        case TokenType::MinusAssign:   return "-=";
+        case TokenType::StarAssign:    return "*=";
+        case TokenType::SlashAssign:   return "/=";
+        case TokenType::PercentAssign: return "%=";
         default:                   return tokenTypeName(t);
     }
 }

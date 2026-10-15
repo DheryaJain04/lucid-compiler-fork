@@ -46,6 +46,14 @@ private:
     int callDepth_ = 0;
     static constexpr int kMaxCallDepth = 2000;
 
+    // Execution budget. Every loop iteration and every function call costs one
+    // step. The playground recompiles on each keystroke, so a half-typed loop
+    // such as `while (i < 5) { print(i); }` must stop instead of hanging.
+    long long steps_ = 0;
+    static constexpr long long kMaxSteps = 2000000;
+    static constexpr size_t kMaxOutputLines = 10000;
+    void spendStep(int line);
+
     void define(const std::string& name, const Value& v);
     bool assign(const std::string& name, const Value& v);
     bool lookup(const std::string& name, Value& out) const;

@@ -1,0 +1,9 @@
+// expect-exit: 0
+// expect-output: 4
+// expect-errors: 
+int n = 100;
+n -= 10;
+n *= 2;
+n /= 3;
+n %= 7;
+print(n);

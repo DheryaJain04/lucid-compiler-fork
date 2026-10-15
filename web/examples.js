@@ -32,6 +32,42 @@ print(add(3, 4));
 `
   },
   {
+    name: "🔁 For loops, else-if, +=",
+    code: `// for-loops, else-if chains and compound assignment
+// are desugared by the parser into while / if / '=' nodes.
+int total = 0;
+for (int i = 1; i <= 10; i += 1) {
+    total += i;
+}
+print(total);
+
+int score = 72;
+if (score >= 90) {
+    print("grade A");
+} else if (score >= 70) {
+    print("grade B");
+} else {
+    print("grade C");
+}
+`
+  },
+  {
+    name: "🌀 Recursion — factorial & Fibonacci",
+    code: `func fact(int n): int {
+    if (n <= 1) { return 1; }
+    return n * fact(n - 1);
+}
+
+func fib(int n): int {
+    if (n < 2) { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
+
+print(fact(5));
+print(fib(10));
+`
+  },
+  {
     name: "⚡ Optimizer — folding + dead code",
     code: `// Watch the Optimizer tab: nodes shrink a lot.
 int a = 2 + 3 * 4;         // folds to 14

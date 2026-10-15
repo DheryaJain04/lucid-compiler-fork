@@ -1,0 +1,7 @@
+// expect-exit: 0
+// expect-output: true|false|true|true
+// expect-errors: 
+print(3 == 3);
+print(3 != 3);
+print("ab" == "ab");
+print(true != false);

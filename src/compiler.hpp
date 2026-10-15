@@ -4,10 +4,12 @@
 // Output: one JSON object describing every phase:
 //   { tokens, ast, symbolTable,
 //     optimized: { astBefore, astAfter, nodesBefore, nodesAfter },
+//     ir: { code, quads, temps, labels },
+//     timings: { lexer, parser, semantic, optimizer, ircode, interpreter, total },
 //     output, errors, success }
 //
-// Runs Lexer -> Parser -> SemanticAnalyzer -> Optimizer -> Interpreter in
-// order. If a phase reports errors, the later phases are skipped but whatever
+// Runs Lexer -> Parser -> SemanticAnalyzer -> Optimizer -> IRGenerator ->
+// Interpreter in order, timing each phase in microseconds. If a phase reports errors, the later phases are skipped but whatever
 // was produced so far is still returned.
 // ============================================================================
 #pragma once

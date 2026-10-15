@@ -1,9 +1,18 @@
 // ============================================================================
 // main_server.cpp — local playground server for Lucid (`lucid-server`).
 // A thin wrapper over the compiler core using cpp-httplib. Serves the static
-// web/ playground and exposes POST /compile. All compiler work stays in pure
-// C++; the browser only renders results and (optionally) calls Gemini itself.
+// web/ playground and exposes:
+//   POST /compile    { source }        -> full compiler result JSON
+//   GET  /ai/status                    -> whether the server holds a Gemini key
+//   POST /ai         { model, prompt } -> relayed Gemini reply (ai_proxy.cpp)
+// All compiler work stays in pure C++. With a server key, every visitor gets
+// the AI features without ever seeing the key.
 // ============================================================================
+#include <chrono>
+#include <filesystem>
+#include <vector>
+#include <csignal>
+#include <cstdio>
 #include <iostream>
 #include <string>
 
@@ -17,10 +26,35 @@
 #include "httplib.h"
 #include "../third_party/json.hpp"
 #include "compiler.hpp"
+#include "ai_proxy.hpp"
 
 #ifndef LUCID_WEB_DIR
 #define LUCID_WEB_DIR "web"
 #endif
+
+namespace fs = std::filesystem;
+
+// Locate the web/ folder at run time, so a binary built on one machine (or
+// shipped prebuilt for Windows) works wherever the repository is cloned.
+static std::string findWebDir(const char* argv0) {
+    std::vector<fs::path> candidates;
+    if (const char* env = std::getenv("LUCID_WEB_DIR")) candidates.emplace_back(env);
+    candidates.emplace_back(LUCID_WEB_DIR);                  // where it was built
+    candidates.push_back(fs::current_path() / "web");        // run from the repo root
+    std::error_code ec;
+    fs::path exeDir = fs::absolute(argv0, ec).parent_path();
+    for (fs::path dir = exeDir; !dir.empty(); dir = dir.parent_path()) {
+        candidates.push_back(dir / "web");                   // build/, windows/, ...
+        if (dir == dir.root_path()) break;
+    }
+    for (const auto& c : candidates)
+        if (fs::exists(c / "index.html", ec)) return fs::absolute(c, ec).string();
+    return "web";
+}
+
+// Prompts are a program plus a few lines of instructions; anything far larger
+// is not a playground request.
+static const size_t kMaxPromptBytes = 64 * 1024;
 
 int main(int argc, char** argv) {
     int port = 8080;
@@ -30,10 +64,20 @@ int main(int argc, char** argv) {
         try { port = std::stoi(env); } catch (...) {}
     }
 
+#ifndef _WIN32
+    // A client that disconnects mid-reply must not kill the server.
+    std::signal(SIGPIPE, SIG_IGN);
+#endif
+
+    const std::string webDir = findWebDir(argv[0]);
+    // gemini.key sits in the project root, next to web/.
+    const std::string keyFile = (fs::path(webDir).parent_path() / "gemini.key").string();
+    std::string keySource;
+    const std::string serverKey = lucid::loadServerKey(keyFile, keySource);
+
     httplib::Server server;
 
     // Serve the playground (index.html, style.css, app.js, examples.js).
-    const std::string webDir = LUCID_WEB_DIR;
     if (!server.set_mount_point("/", webDir)) {
         std::cerr << "warning: could not mount web dir '" << webDir
                   << "' — static files will not be served.\n";
@@ -73,6 +117,49 @@ int main(int argc, char** argv) {
         res.set_content(out.dump(), "application/json");
     });
 
+    // ---- AI relay -----------------------------------------------------------
+    server.Get("/ai/status", [&](const httplib::Request&, httplib::Response& res) {
+        nlohmann::json out = {{"serverKey", !serverKey.empty()}};   // never the key itself
+        res.set_content(out.dump(), "application/json");
+    });
+
+    server.Post("/ai", [&](const httplib::Request& req, httplib::Response& res) {
+        auto fail = [&](int status, const std::string& message) {
+            res.status = status;
+            nlohmann::json j = {{"error", {{"code", status}, {"message", message}}}};
+            res.set_content(j.dump(), "application/json");
+        };
+
+        // Only the playground's own page may spend the key. A browser always
+        // sends Origin on a cross-site POST, so another website cannot use it.
+        if (req.has_header("Origin")) {
+            std::string expected = "http://" + req.get_header_value("Host");
+            if (req.get_header_value("Origin") != expected)
+                return fail(403, "AI requests are only accepted from the playground page itself.");
+        }
+        if (serverKey.empty())
+            return fail(503, "This server has no Gemini key. Set GEMINI_API_KEY or create gemini.key, "
+                             "or paste your own key in the playground.");
+
+        nlohmann::json body;
+        try { body = nlohmann::json::parse(req.body); }
+        catch (...) { return fail(400, "Request body must be JSON: { \"model\", \"prompt\" }."); }
+        std::string model = body.value("model", "");
+        std::string prompt = body.value("prompt", "");
+        if (!lucid::isAllowedModel(model)) return fail(400, "Unknown model id.");
+        if (prompt.empty()) return fail(400, "Empty prompt.");
+        if (prompt.size() > kMaxPromptBytes) return fail(413, "Prompt too large.");
+
+        auto start = std::chrono::steady_clock::now();
+        lucid::AiReply reply = lucid::callGemini(model, prompt, serverKey);
+        double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+        std::printf("AI relay  %-18s -> HTTP %d in %.1fs\n", model.c_str(), reply.status, secs);
+        std::fflush(stdout);
+
+        res.status = reply.status;
+        res.set_content(reply.body, "application/json");
+    });
+
     // Simple health check.
     server.Get("/health", [](const httplib::Request&, httplib::Response& res) {
         res.set_content("{\"status\":\"ok\"}", "application/json");
@@ -80,6 +167,11 @@ int main(int argc, char** argv) {
 
     std::cout << "Lucid playground running at  http://localhost:" << port << "\n";
     std::cout << "Serving web assets from      " << webDir << "\n";
+    if (serverKey.empty())
+        std::cout << "AI features: visitors must paste their own Gemini key\n"
+                     "             (or set GEMINI_API_KEY / create gemini.key and restart)\n";
+    else
+        std::cout << "AI features: ON for every visitor, using the key from " << keySource << "\n";
     std::cout << "Press Ctrl+C to stop.\n";
 
     if (!server.listen("0.0.0.0", port)) {

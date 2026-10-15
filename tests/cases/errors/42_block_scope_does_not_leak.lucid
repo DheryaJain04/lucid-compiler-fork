@@ -1,0 +1,7 @@
+// expect-exit: 1
+// expect-output: 
+// expect-errors: semantic:UndeclaredVariable
+if (true) {
+    int y = 1;
+}
+print(y);

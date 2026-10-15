@@ -11,3 +11,6 @@ build/
 
 # Presentation build backups
 *.bak
+
+# Gemini API key for lucid-server - secret, never commit
+gemini.key

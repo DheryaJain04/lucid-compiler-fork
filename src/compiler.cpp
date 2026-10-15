@@ -1,6 +1,7 @@
 // ============================================================================
 // compiler.cpp — Phase orchestrator for Lucid.
-// Wires the five phases together and assembles the JSON the front-end renders.
+// Wires the six phases together, times each one, and assembles the JSON the
+// front-end renders.
 // ============================================================================
 #include "compiler.hpp"
 
@@ -11,12 +12,26 @@
 #include "parser.hpp"
 #include "semantic.hpp"
 #include "optimizer.hpp"
+#include "ircode.hpp"
 #include "interpreter.hpp"
+
+#include <chrono>
 
 namespace lucid {
 
+namespace {
+// Wall-clock microseconds since `start`, for the per-phase timing report.
+double micros(std::chrono::steady_clock::time_point start) {
+    using namespace std::chrono;
+    return duration<double, std::micro>(steady_clock::now() - start).count();
+}
+} // namespace
+
 nlohmann::json compile(const std::string& source) {
     using nlohmann::json;
+    using Clock = std::chrono::steady_clock;
+    const auto t0 = Clock::now();
+    json timings = json::object();
 
     ErrorList errors;
     json result = {
@@ -24,33 +39,50 @@ nlohmann::json compile(const std::string& source) {
         {"ast", nullptr},
         {"symbolTable", nullptr},
         {"optimized", nullptr},
+        {"ir", nullptr},
+        {"timings", nullptr},
         {"output", json::array()},
         {"errors", json::array()},
         {"success", false}
     };
 
+    auto finish = [&]() {
+        timings["total"] = micros(t0);
+        result["timings"] = timings;
+        result["errors"] = errors.toJson();
+        return result;
+    };
+
     // ---- Phase 1: Lexer ----
+    auto ts = Clock::now();
     Lexer lexer(source, errors);
     std::vector<Token> tokens = lexer.tokenize();
+    timings["lexer"] = micros(ts);
     for (const auto& t : tokens) result["tokens"].push_back(tokenToJson(t));
-    if (!errors.empty()) { result["errors"] = errors.toJson(); return result; }
+    if (!errors.empty()) return finish();
 
     // ---- Phase 2: Parser ----
+    ts = Clock::now();
     Parser parser(tokens, source, errors);
     std::unique_ptr<Program> program = parser.parse();
+    timings["parser"] = micros(ts);
     result["ast"] = program->toJson();
-    if (!errors.empty()) { result["errors"] = errors.toJson(); return result; }
+    if (!errors.empty()) return finish();
 
     // ---- Phase 3: Semantic analysis ----
+    ts = Clock::now();
     SemanticAnalyzer sema(source, errors);
     result["symbolTable"] = sema.analyze(*program);
-    if (!errors.empty()) { result["errors"] = errors.toJson(); return result; }
+    timings["semantic"] = micros(ts);
+    if (!errors.empty()) return finish();
 
     // ---- Phase 4: Optimizer ----
     json astBefore = result["ast"];                 // pre-optimization tree
     int nodesBefore = countJsonNodes(astBefore);
+    ts = Clock::now();
     Optimizer optimizer;
     optimizer.optimize(*program);
+    timings["optimizer"] = micros(ts);
     json astAfter = program->toJson();
     int nodesAfter = countJsonNodes(astAfter);
     result["optimized"] = {
@@ -61,14 +93,27 @@ nlohmann::json compile(const std::string& source) {
         {"removed", nodesBefore - nodesAfter}
     };
 
-    // ---- Phase 5: Interpreter (runs on the optimized tree) ----
+    // ---- Phase 5: Intermediate code generation (three-address code) ----
+    ts = Clock::now();
+    IRGenerator irgen;
+    std::vector<Quad> quads = irgen.generate(*program);
+    timings["ircode"] = micros(ts);
+    result["ir"] = {
+        {"code", quadsToJson(quads)},
+        {"quads", quads.size()},
+        {"temps", irgen.tempCount()},
+        {"labels", irgen.labelCount()}
+    };
+
+    // ---- Phase 6: Interpreter (runs on the optimized tree) ----
+    ts = Clock::now();
     Interpreter interp(source, errors);
     std::vector<std::string> out = interp.run(*program);
+    timings["interpreter"] = micros(ts);
     for (const auto& line : out) result["output"].push_back(line);
 
-    result["errors"] = errors.toJson();
     result["success"] = errors.empty();
-    return result;
+    return finish();
 }
 
 } // namespace lucid
